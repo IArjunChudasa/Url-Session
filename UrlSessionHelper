@@ -1,0 +1,75 @@
+import Foundation
+
+class URLSessionHelper {
+    
+    enum HttpMethod: String {
+        case get = "GET"
+        case post = "POST"
+        case put = "PUT"
+        case delete = "DELETE"
+    }
+    
+    typealias CompletionHandler = (Data?, URLResponse?, Error?) -> Void
+    
+    func request(_ url: URL, method: HttpMethod, parameters: [String: Any]? = nil, headers: [String: String]? = nil, completion: @escaping CompletionHandler) {
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = method.rawValue
+        
+        if let headers = headers {
+            for (key, value) in headers {
+                request.addValue(value, forHTTPHeaderField: key)
+            }
+        }
+        
+        if let parameters = parameters {
+            request.httpBody = try? JSONSerialization.data(withJSONObject: parameters, options: [])
+        }
+        
+        let session = URLSession.shared
+        let task = session.dataTask(with: request) { data, response, error in
+            completion(data, response, error)
+        }
+        task.resume()
+    }
+    
+    func get(_ url: URL, headers: [String: String]? = nil, completion: @escaping CompletionHandler) {
+        request(url, method: .get, headers: headers, completion: completion)
+    }
+    
+    func post(_ url: URL, parameters: [String: Any], headers: [String: String]? = nil, completion: @escaping CompletionHandler) {
+        request(url, method: .post, parameters: parameters, headers: headers, completion: completion)
+    }
+    
+    func put(_ url: URL, parameters: [String: Any], headers: [String: String]? = nil, completion: @escaping CompletionHandler) {
+        request(url, method: .put, parameters: parameters, headers: headers, completion: completion)
+    }
+    
+    func delete(_ url: URL, headers: [String: String]? = nil, completion: @escaping CompletionHandler) {
+        request(url, method: .delete, headers: headers, completion: completion)
+    }
+    
+    func sendMultipartData(url: URL, data: Data, fileName: String, completion: @escaping CompletionHandler) {
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        
+        let boundary = "Boundary-\(UUID().uuidString)"
+        let contentType = "multipart/form-data; boundary=\(boundary)"
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        
+        let body = NSMutableData()
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(fileName)\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: application/octet-stream\r\n\r\n".data(using: .utf8)!)
+        body.append(data)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        request.httpBody = body as Data
+        
+        let session = URLSession.shared
+        let task = session.dataTask(with: request) { data, response, error in
+            completion(data, response, error)
+        }
+        task.resume()
+    }
+}
