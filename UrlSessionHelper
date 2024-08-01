@@ -2,6 +2,10 @@ import Foundation
 
 class URLSessionHelper {
     
+    static let shared = URLSessionHelper()
+    
+    private init() {}
+    
     enum HttpMethod: String {
         case get = "GET"
         case post = "POST"
@@ -9,9 +13,16 @@ class URLSessionHelper {
         case delete = "DELETE"
     }
     
-    typealias CompletionHandler = (Data?, URLResponse?, Error?) -> Void
+    enum APIError: Error {
+        case invalidResponse
+        case noData
+        case failedRequest(String)
+        case invalidStatusCode(Int)
+    }
     
-    func request(_ url: URL, method: HttpMethod, parameters: [String: Any]? = nil, headers: [String: String]? = nil, completion: @escaping CompletionHandler) {
+    typealias CompletionHandler = (Result<Data, Error>) -> Void
+    
+    private func request(_ url: URL, method: HttpMethod, parameters: [String: Any]? = nil, headers: [String: String]? = nil, completion: @escaping CompletionHandler) {
         
         var request = URLRequest(url: url)
         request.httpMethod = method.rawValue
@@ -23,12 +34,38 @@ class URLSessionHelper {
         }
         
         if let parameters = parameters {
-            request.httpBody = try? JSONSerialization.data(withJSONObject: parameters, options: [])
+            do {
+                request.httpBody = try JSONSerialization.data(withJSONObject: parameters, options: [])
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            } catch {
+                completion(.failure(error))
+                return
+            }
         }
         
         let session = URLSession.shared
         let task = session.dataTask(with: request) { data, response, error in
-            completion(data, response, error)
+            if let error = error {
+                completion(.failure(APIError.failedRequest(error.localizedDescription)))
+                return
+            }
+            
+            guard let httpResponse = response as? HTTPURLResponse else {
+                completion(.failure(APIError.invalidResponse))
+                return
+            }
+            
+            guard (200...299).contains(httpResponse.statusCode) else {
+                completion(.failure(APIError.invalidStatusCode(httpResponse.statusCode)))
+                return
+            }
+            
+            guard let data = data else {
+                completion(.failure(APIError.noData))
+                return
+            }
+            
+            completion(.success(data))
         }
         task.resume()
     }
@@ -50,25 +87,42 @@ class URLSessionHelper {
     }
     
     func sendMultipartData(url: URL, data: Data, fileName: String, completion: @escaping CompletionHandler) {
-        
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        
         let boundary = "Boundary-\(UUID().uuidString)"
-        let contentType = "multipart/form-data; boundary=\(boundary)"
-        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        var request = URLRequest(url: url)
+        request.httpMethod = HttpMethod.post.rawValue
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         
-        let body = NSMutableData()
+        var body = Data()
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
         body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(fileName)\"\r\n".data(using: .utf8)!)
         body.append("Content-Type: application/octet-stream\r\n\r\n".data(using: .utf8)!)
         body.append(data)
         body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
-        request.httpBody = body as Data
+        request.httpBody = body
         
         let session = URLSession.shared
         let task = session.dataTask(with: request) { data, response, error in
-            completion(data, response, error)
+            if let error = error {
+                completion(.failure(APIError.failedRequest(error.localizedDescription)))
+                return
+            }
+            
+            guard let httpResponse = response as? HTTPURLResponse else {
+                completion(.failure(APIError.invalidResponse))
+                return
+            }
+            
+            guard (200...299).contains(httpResponse.statusCode) else {
+                completion(.failure(APIError.invalidStatusCode(httpResponse.statusCode)))
+                return
+            }
+            
+            guard let data = data else {
+                completion(.failure(APIError.noData))
+                return
+            }
+            
+            completion(.success(data))
         }
         task.resume()
     }
